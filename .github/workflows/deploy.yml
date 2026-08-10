@@ -19,7 +19,7 @@ jobs:
     # Extra safety: never deploy unless the workflow is running on main
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     environment: production
 
     steps:
@@ -32,207 +32,476 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-
           check_secret() {
             local name="$1"
             local val="$2"
             if [ -z "$val" ]; then
-              echo "::error title=Missing secret ${name}::Create repository secret '${name}' under Settings → Secrets and variables → Actions. Do not commit credentials."
+              echo "::error title=Missing secret ${name}::Create repository secret '${name}' under Settings → Secrets and variables → Actions."
               missing=1
             else
               echo "OK — secret '${name}' is configured (value hidden)."
             fi
           }
-
-          echo "Starting deployment secret validation..."
           check_secret "EC2_HOST" "${EC2_HOST}"
           check_secret "EC2_USER" "${EC2_USER}"
           check_secret "EC2_SSH_KEY" "${EC2_SSH_KEY}"
           check_secret "EC2_APP_PATH" "${EC2_APP_PATH}"
-
           if [ "$missing" -ne 0 ]; then
-            {
-              echo "## Missing GitHub Actions secrets"
-              echo ""
-              echo "This workflow cannot deploy until all four repository secrets exist."
-              echo ""
-              echo "### Where to add them"
-              echo "1. Open the GitHub repository"
-              echo "2. **Settings** → **Secrets and variables** → **Actions**"
-              echo "3. **New repository secret** for each name below"
-              echo ""
-              echo "| Secret name | Expected value |"
-              echo "| --- | --- |"
-              echo "| \`EC2_HOST\` | EC2 Elastic IP or public DNS |"
-              echo "| \`EC2_USER\` | \`ubuntu\` |"
-              echo "| \`EC2_SSH_KEY\` | Full private SSH key (BEGIN/END lines included) |"
-              echo "| \`EC2_APP_PATH\` | \`/var/www/ZYLEARN\` |"
-              echo ""
-              echo "Names are **case-sensitive**. Never commit the private key to the repo."
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Fix: add the missing secrets, then re-run this workflow."
             exit 1
           fi
 
-          echo "All required secrets are present. Continuing deployment..."
-
-      - name: Deploy to EC2 over SSH
-        id: deploy
+      # ── 1) SSH connection test ──────────────────────────────────────────
+      - name: SSH connection test
+        id: ssh_test
         uses: appleboy/ssh-action@v1.2.0
-        env:
-          APP_PATH: ${{ secrets.EC2_APP_PATH }}
-          GIT_SHA: ${{ github.sha }}
-          GIT_REF: ${{ github.ref_name }}
-          GIT_REPO: ${{ github.repository }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
-          command_timeout: 15m
-          envs: APP_PATH,GIT_SHA,GIT_REF,GIT_REPO
+          command_timeout: 2m
           script: |
-            set -euo pipefail
+            set -e
+            echo "STEP: SSH connection test"
+            echo "COMMAND: whoami"
+            whoami
+            echo "COMMAND: hostname"
+            hostname
+            echo "COMMAND: date -u"
+            date -u
+            echo "SSH connection OK"
 
-            echo "Starting deployment..."
-            echo "Connecting to EC2... OK"
-            echo "Repository : ${GIT_REPO}"
-            echo "Branch     : ${GIT_REF}"
-            echo "Commit     : ${GIT_SHA}"
-            echo "App path   : ${APP_PATH}"
-
-            # Load Node if installed via nvm (common on Ubuntu EC2)
-            export NVM_DIR="${HOME}/.nvm"
-            if [ -s "${NVM_DIR}/nvm.sh" ]; then
+      # ── 2) Tooling versions (Node / npm / Git / PM2) ─────────────────────
+      - name: Check Node.js / npm / Git / PM2 versions
+        id: check_tools
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 2m
+          script: |
+            set -e
+            echo "STEP: Check tooling versions"
+            export NVM_DIR="$HOME/.nvm"
+            if [ -s "$NVM_DIR/nvm.sh" ]; then
               # shellcheck disable=SC1091
-              . "${NVM_DIR}/nvm.sh"
+              . "$NVM_DIR/nvm.sh"
+              echo "Loaded nvm from $NVM_DIR/nvm.sh"
+            else
+              echo "nvm not found at $HOME/.nvm (using system PATH)"
             fi
 
+            echo "COMMAND: whoami"
+            whoami
+            echo "COMMAND: pwd"
+            pwd
+            echo "COMMAND: echo PATH"
+            echo "$PATH"
+
+            echo "COMMAND: command -v node"
             if ! command -v node >/dev/null 2>&1; then
-              echo "ERROR: Node.js not found for user $(whoami). Install Node 20+ or configure nvm."
+              echo "::error::FAILED command: node -v"
+              echo "FIX: Install Node.js 20+ for user ubuntu (nvm or NodeSource), then re-login and re-run."
               exit 1
             fi
+            echo "COMMAND: node -v"
+            node -v
+
+            echo "COMMAND: command -v npm"
             if ! command -v npm >/dev/null 2>&1; then
-              echo "ERROR: npm not found."
+              echo "::error::FAILED command: npm -v"
+              echo "FIX: Install npm alongside Node.js for user ubuntu."
               exit 1
             fi
+            echo "COMMAND: npm -v"
+            npm -v
+
+            echo "COMMAND: command -v git"
+            if ! command -v git >/dev/null 2>&1; then
+              echo "::error::FAILED command: git --version"
+              echo "FIX: sudo apt-get install -y git"
+              exit 1
+            fi
+            echo "COMMAND: git --version"
+            git --version
+
+            echo "COMMAND: command -v pm2"
             if ! command -v pm2 >/dev/null 2>&1; then
-              echo "ERROR: pm2 not found on PATH for user $(whoami)."
+              echo "::error::FAILED command: pm2 -v"
+              echo "FIX: npm install -g pm2  (as ubuntu, no sudo npm for project installs)"
+              exit 1
+            fi
+            echo "COMMAND: pm2 -v"
+            pm2 -v
+            echo "Tooling check OK"
+
+      # ── 3) Application directory + package files ────────────────────────
+      - name: Check application directory and package files
+        id: check_app_dir
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 2m
+          envs: APP_PATH
+          script: |
+            set -e
+            echo "STEP: Check application directory"
+            echo "APP_PATH length (hidden value): ${#APP_PATH}"
+
+            if [ -z "${APP_PATH}" ]; then
+              echo "::error::FAILED: EC2_APP_PATH secret is empty"
+              echo "FIX: Set GitHub secret EC2_APP_PATH=/var/www/ZYLEARN"
               exit 1
             fi
 
-            echo "Node: $(node -v) | npm: $(npm -v) | pm2: $(pm2 -v)"
-
-            if [ -z "${APP_PATH}" ] || [ ! -d "${APP_PATH}" ]; then
-              echo "ERROR: Application directory missing or APP_PATH empty: '${APP_PATH}'"
+            echo "COMMAND: test -d \"\$APP_PATH\""
+            if [ ! -d "${APP_PATH}" ]; then
+              echo "::error::FAILED command: test -d \$APP_PATH"
+              echo "FIX: Create/clone the app on EC2, then: sudo chown -R ubuntu:ubuntu /var/www/ZYLEARN"
               exit 1
             fi
+            echo "Directory exists"
 
+            echo "COMMAND: test -f \"\$APP_PATH/package.json\""
+            if [ ! -f "${APP_PATH}/package.json" ]; then
+              echo "::error::FAILED command: test -f \$APP_PATH/package.json"
+              echo "FIX: Ensure the React repo is cloned into EC2_APP_PATH"
+              exit 1
+            fi
+            echo "package.json exists"
+
+            echo "COMMAND: test -f \"\$APP_PATH/package-lock.json\""
+            if [ ! -f "${APP_PATH}/package-lock.json" ]; then
+              echo "::error::FAILED command: test -f \$APP_PATH/package-lock.json"
+              echo "FIX: Commit package-lock.json on main (required for npm ci)"
+              exit 1
+            fi
+            echo "package-lock.json exists"
+
+            echo "COMMAND: test -d \"\$APP_PATH/.git\""
+            if [ ! -d "${APP_PATH}/.git" ]; then
+              echo "::error::FAILED command: test -d \$APP_PATH/.git"
+              echo "FIX: git clone the GitHub repo into EC2_APP_PATH once"
+              exit 1
+            fi
+            echo "Git repository exists"
+
+            echo "COMMAND: ls -la package.json package-lock.json"
+            ls -la "${APP_PATH}/package.json" "${APP_PATH}/package-lock.json"
+            echo "Application directory check OK"
+
+      # ── 4) Git status + pull latest main ────────────────────────────────
+      - name: Check Git status and pull latest main
+        id: git_pull
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+          GIT_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 5m
+          envs: APP_PATH,GIT_SHA
+          script: |
+            set -e
+            echo "STEP: Git fetch / reset"
             cd "${APP_PATH}"
+            echo "COMMAND: pwd"
+            pwd
+            echo "COMMAND: whoami"
+            whoami
 
-            if [ ! -d .git ]; then
-              echo "ERROR: No git repository at ${APP_PATH}. Clone the repo once on EC2 before using CI/CD."
+            echo "COMMAND: git status -sb"
+            git status -sb
+            echo "COMMAND: git rev-parse HEAD"
+            PREV_SHA="$(git rev-parse HEAD)"
+            echo "Previous commit: ${PREV_SHA}"
+            echo "Target GitHub commit: ${GIT_SHA}"
+
+            echo "COMMAND: git fetch origin main"
+            if ! git fetch origin main; then
+              echo "::error::FAILED command: git fetch origin main"
+              echo "FIX: On EC2 as ubuntu, configure GitHub auth (deploy key or SSH remote)."
+              echo "  cd \$APP_PATH && git remote -v"
+              echo "  Test: git ls-remote origin main"
               exit 1
             fi
 
-            PREV_SHA="$(git rev-parse HEAD)"
-            echo "Currently deployed commit: ${PREV_SHA}"
+            echo "COMMAND: git reset --hard origin/main"
+            if ! git reset --hard origin/main; then
+              echo "::error::FAILED command: git reset --hard origin/main"
+              echo "FIX: Ensure ubuntu owns the files: sudo chown -R ubuntu:ubuntu /var/www/ZYLEARN"
+              exit 1
+            fi
 
-            echo "Pulling latest code..."
-            git fetch origin main
-            # Tracked files only — gitignored .env / .env.production are preserved
-            git reset --hard origin/main
+            echo "COMMAND: git rev-parse HEAD"
             DEPLOY_SHA="$(git rev-parse HEAD)"
             echo "Now at commit: ${DEPLOY_SHA}"
+            echo "COMMAND: git status -sb"
+            git status -sb
+            echo "Git pull OK"
+            # Persist previous SHA for later steps via a local file (same host)
+            echo "${PREV_SHA}" > /tmp/zylearn_prev_sha
+            echo "${DEPLOY_SHA}" > /tmp/zylearn_deploy_sha
 
-            if [ ! -f package-lock.json ]; then
-              echo "ERROR: package-lock.json missing. Refusing to deploy without a lockfile."
-              exit 1
-            fi
+      # ── 5) npm ci ───────────────────────────────────────────────────────
+      - name: npm ci
+        id: npm_ci
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 10m
+          envs: APP_PATH
+          script: |
+            set -e
+            echo "STEP: npm ci"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-            echo "Installing dependencies (npm ci)..."
+            cd "${APP_PATH}"
+            echo "COMMAND: pwd && node -v && npm -v"
+            pwd
+            node -v
+            npm -v
+
+            echo "COMMAND: npm ci"
             if ! npm ci; then
-              echo "ERROR: npm ci failed. Leaving previous PM2 process untouched."
-              git reset --hard "${PREV_SHA}"
+              echo "::error::FAILED command: npm ci"
+              echo "FIX:"
+              echo "  1) Ensure package-lock.json matches package.json on main"
+              echo "  2) On EC2: cd /var/www/ZYLEARN && rm -rf node_modules && npm ci"
+              echo "  3) Check disk space: df -h"
+              echo "PM2 was NOT restarted."
               exit 1
             fi
+            echo "npm ci OK — PM2 not restarted yet"
 
-            echo "Building React application (npm run build → dist/)..."
+      # ── 6) npm run build ────────────────────────────────────────────────
+      - name: npm run build
+        id: npm_build
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 10m
+          envs: APP_PATH
+          script: |
+            set -e
+            echo "STEP: npm run build"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            cd "${APP_PATH}"
+            echo "COMMAND: pwd && node -v && npm -v"
+            pwd
+            node -v
+            npm -v
+
+            echo "COMMAND: npm run build"
             if ! npm run build; then
-              echo "ERROR: Build failed. Leaving previous PM2 process untouched."
-              git reset --hard "${PREV_SHA}"
-              npm ci || true
+              echo "::error::FAILED command: npm run build"
+              echo "FIX:"
+              echo "  1) Run locally: npm ci && npm run build"
+              echo "  2) Fix TypeScript/Vite errors shown above"
+              echo "  3) On EC2: cd /var/www/ZYLEARN && npm run build"
+              echo "PM2 was NOT restarted."
               exit 1
             fi
+            echo "npm run build OK — PM2 not restarted yet"
 
+      # ── 7) Check dist/ ──────────────────────────────────────────────────
+      - name: Check dist directory
+        id: check_dist
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 2m
+          envs: APP_PATH
+          script: |
+            set -e
+            echo "STEP: Check dist directory"
+            cd "${APP_PATH}"
+
+            echo "COMMAND: test -d dist"
             if [ ! -d dist ]; then
-              echo "ERROR: Build succeeded but dist/ was not produced."
-              git reset --hard "${PREV_SHA}"
-              npm ci || true
+              echo "::error::FAILED command: test -d dist"
+              echo "FIX: Vite should output dist/. Check vite.config and rebuild."
+              echo "PM2 was NOT restarted."
               exit 1
             fi
 
-            echo "Restarting PM2..."
+            echo "COMMAND: test -f dist/index.html"
+            if [ ! -f dist/index.html ]; then
+              echo "::error::FAILED command: test -f dist/index.html"
+              echo "FIX: Build did not produce dist/index.html — inspect Vite build output."
+              echo "PM2 was NOT restarted."
+              exit 1
+            fi
 
-            restart_or_start_pm2() {
-              if pm2 describe ZYLEARN >/dev/null 2>&1; then
-                pm2 restart ZYLEARN --update-env
-                return 0
-              fi
+            echo "COMMAND: ls -la dist | head -n 30"
+            ls -la dist | head -n 30
+            echo "dist/ check OK — PM2 not restarted yet"
+
+      # ── 8) Check PM2 process ────────────────────────────────────────────
+      - name: Check PM2 process ZYLEARN
+        id: check_pm2
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 2m
+          envs: APP_PATH
+          script: |
+            set -e
+            echo "STEP: Check PM2 process"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            echo "COMMAND: pm2 -v"
+            pm2 -v
+            echo "COMMAND: pm2 status"
+            pm2 status
+
+            echo "COMMAND: pm2 describe ZYLEARN"
+            if pm2 describe ZYLEARN >/dev/null 2>&1; then
+              echo "PM2 process ZYLEARN exists"
+              pm2 describe ZYLEARN | head -n 40
+              echo "exists" > /tmp/zylearn_pm2_mode
+            else
+              echo "PM2 process ZYLEARN does NOT exist yet"
+              cd "${APP_PATH}"
               if [ -f ecosystem.config.cjs ]; then
-                echo "PM2 process missing — starting from ecosystem.config.cjs"
-                pm2 start ecosystem.config.cjs
-                return 0
-              fi
-              if [ -f ecosystem.config.js ]; then
-                echo "PM2 process missing — starting from ecosystem.config.js"
-                pm2 start ecosystem.config.js
-                return 0
-              fi
-              echo "ERROR: PM2 process 'ZYLEARN' does not exist and no ecosystem.config.js/.cjs found."
-              echo "Start it once on EC2 (do not create duplicates), then re-run this workflow."
-              return 1
-            }
-
-            rollback() {
-              echo "WARNING: Rolling back to previous commit ${PREV_SHA}..."
-              git reset --hard "${PREV_SHA}"
-              npm ci
-              npm run build
-              if pm2 describe ZYLEARN >/dev/null 2>&1; then
-                pm2 restart ZYLEARN --update-env
-              elif [ -f ecosystem.config.cjs ]; then
-                pm2 start ecosystem.config.cjs
+                echo "Found ecosystem.config.cjs — will start from it (no duplicate invent)"
+                echo "ecosystem_cjs" > /tmp/zylearn_pm2_mode
               elif [ -f ecosystem.config.js ]; then
-                pm2 start ecosystem.config.js
+                echo "Found ecosystem.config.js — will start from it (no duplicate invent)"
+                echo "ecosystem_js" > /tmp/zylearn_pm2_mode
+              else
+                echo "::error::FAILED: PM2 process ZYLEARN missing and no ecosystem.config.js/.cjs"
+                echo "FIX (one-time on EC2, do not create duplicates):"
+                echo "  cd /var/www/ZYLEARN"
+                echo "  # start your existing serve/preview command under name ZYLEARN, e.g. via ecosystem file"
+                echo "  pm2 status"
+                exit 1
               fi
-              pm2 status ZYLEARN || true
-            }
+            fi
+            echo "PM2 pre-check OK"
 
-            if ! restart_or_start_pm2; then
-              rollback
+      # ── 9) pm2 restart / start (ONLY after successful build) ────────────
+      - name: pm2 restart ZYLEARN
+        id: pm2_restart
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_PATH: ${{ secrets.EC2_APP_PATH }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 3m
+          envs: APP_PATH
+          script: |
+            set -e
+            echo "STEP: pm2 restart/start ZYLEARN"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            cd "${APP_PATH}"
+
+            if pm2 describe ZYLEARN >/dev/null 2>&1; then
+              echo "COMMAND: pm2 restart ZYLEARN --update-env"
+              if ! pm2 restart ZYLEARN --update-env; then
+                echo "::error::FAILED command: pm2 restart ZYLEARN --update-env"
+                echo "FIX: pm2 logs ZYLEARN --lines 100"
+                exit 1
+              fi
+            elif [ -f ecosystem.config.cjs ]; then
+              echo "COMMAND: pm2 start ecosystem.config.cjs"
+              if ! pm2 start ecosystem.config.cjs; then
+                echo "::error::FAILED command: pm2 start ecosystem.config.cjs"
+                exit 1
+              fi
+            elif [ -f ecosystem.config.js ]; then
+              echo "COMMAND: pm2 start ecosystem.config.js"
+              if ! pm2 start ecosystem.config.js; then
+                echo "::error::FAILED command: pm2 start ecosystem.config.js"
+                exit 1
+              fi
+            else
+              echo "::error::FAILED: cannot restart/start ZYLEARN"
               exit 1
             fi
+            echo "PM2 restart/start issued OK"
+
+      # ── 10) Verify PM2 status ───────────────────────────────────────────
+      - name: Verify PM2 status
+        id: pm2_verify
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 2m
+          script: |
+            set -e
+            echo "STEP: Verify PM2 status"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
             sleep 3
-            echo "Checking PM2 status..."
+            echo "COMMAND: pm2 status ZYLEARN"
             pm2 status ZYLEARN
 
+            echo "COMMAND: pm2 jlist | node (status === online)"
             if ! pm2 jlist | node -e '
               const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
               const app = data.find((p) => p.name === "ZYLEARN");
-              if (!app) { console.error("ZYLEARN not found in pm2 jlist"); process.exit(1); }
+              if (!app) {
+                console.error("FAILED: ZYLEARN not found in pm2 jlist");
+                process.exit(1);
+              }
               const status = app.pm2_env && app.pm2_env.status;
               console.log("ZYLEARN status:", status);
-              if (status !== "online") process.exit(1);
+              if (status !== "online") {
+                console.error("FAILED: expected status online, got:", status);
+                process.exit(1);
+              }
             '; then
-              echo "ERROR: PM2 process ZYLEARN is not online after restart."
-              rollback
+              echo "::error::FAILED command: verify pm2 status online for ZYLEARN"
+              echo "FIX: pm2 logs ZYLEARN --lines 100"
+              echo "     curl -I http://127.0.0.1:3000"
               exit 1
             fi
 
-            pm2 save || true
             echo "Deployment completed successfully."
-            echo "Commit: ${DEPLOY_SHA}"
 
       - name: Deployment summary
         if: always()
@@ -246,8 +515,17 @@ jobs:
             echo "| Branch | \`${{ github.ref_name }}\` |"
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Job status | \`${{ job.status }}\` |"
-            echo "| Actor | \`${{ github.actor }}\` |"
-            echo "| Event | \`${{ github.event_name }}\` |"
+            echo "| SSH test | \`${{ steps.ssh_test.outcome }}\` |"
+            echo "| Tools check | \`${{ steps.check_tools.outcome }}\` |"
+            echo "| App dir check | \`${{ steps.check_app_dir.outcome }}\` |"
+            echo "| Git pull | \`${{ steps.git_pull.outcome }}\` |"
+            echo "| npm ci | \`${{ steps.npm_ci.outcome }}\` |"
+            echo "| npm build | \`${{ steps.npm_build.outcome }}\` |"
+            echo "| dist check | \`${{ steps.check_dist.outcome }}\` |"
+            echo "| PM2 check | \`${{ steps.check_pm2.outcome }}\` |"
+            echo "| PM2 restart | \`${{ steps.pm2_restart.outcome }}\` |"
+            echo "| PM2 verify | \`${{ steps.pm2_verify.outcome }}\` |"
             echo ""
-            echo "EC2 host / SSH key / app path are read from GitHub secrets and are not printed here."
+            echo "Open the **first failed step** above — the log line starting with \`FAILED command:\` is the exact failing command."
+            echo "Secrets are never printed."
           } >> "$GITHUB_STEP_SUMMARY"
