@@ -424,7 +424,8 @@ jobs:
 
             if pm2 describe ZYLEARN >/dev/null 2>&1; then
               echo "PM2 process ZYLEARN exists"
-              pm2 describe ZYLEARN | head -n 60
+              pm2 describe ZYLEARN > /tmp/zylearn_pm2_precheck.txt
+              sed -n '1,60p' /tmp/zylearn_pm2_precheck.txt
             else
               echo "PM2 process ZYLEARN does NOT exist yet"
               cd "${APP_PATH}"
@@ -496,33 +497,45 @@ jobs:
 
             sleep 3
             echo "PM2 status after restart..."
+            # Do NOT pipe pm2 to head/monit — that causes EPIPE under Node 25 / appleboy script_stop
             pm2 status ZYLEARN
-            pm2 describe ZYLEARN | head -n 80
+            pm2 describe ZYLEARN > /tmp/zylearn_pm2_describe.txt
+            sed -n '1,80p' /tmp/zylearn_pm2_describe.txt
 
-            if ! pm2 jlist | node -e '
-              const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
-              const app = data.find((p) => p.name === "ZYLEARN");
-              if (!app) {
-                console.error("FAILED: ZYLEARN not found in pm2 jlist");
-                process.exit(1);
-              }
-              const status = app.pm2_env && app.pm2_env.status;
-              const exec = (app.pm2_env && (app.pm2_env.exec_interpreter || app.pm2_env.exec_path)) || "";
-              console.log("ZYLEARN status:", status);
-              console.log("ZYLEARN exec_interpreter/path:", exec);
-              if (status !== "online") {
-                console.error("FAILED: expected status online, got:", status);
-                process.exit(1);
-              }
-            '; then
+            echo "COMMAND: verify ZYLEARN is online"
+            # Single-line node -p (multiline node -e breaks with appleboy script_stop injection)
+            PM2_STATUS="$(pm2 jlist | node -p "const a=JSON.parse(require('fs').readFileSync(0,'utf8')).find(p=>p.name==='ZYLEARN'); if(!a){ process.stderr.write('ZYLEARN not found\\n'); process.exit(1);} a.pm2_env.status")"
+            PM2_STATUS="$(printf '%s' "$PM2_STATUS" | tr -d '[:space:]')"
+            echo "ZYLEARN status: ${PM2_STATUS}"
+
+            if [ -z "$PM2_STATUS" ]; then
+              echo "::error::FAILED: could not read PM2 status for ZYLEARN"
+              echo "FIX: pm2 logs ZYLEARN --lines 100"
+              exit 1
+            fi
+
+            if [ "$PM2_STATUS" != "online" ]; then
               echo "::error::FAILED command: verify pm2 status online for ZYLEARN"
+              echo "Expected: online"
+              echo "Found: ${PM2_STATUS}"
               echo "FIX: pm2 logs ZYLEARN --lines 100"
               echo "     curl -I http://127.0.0.1:3000"
               exit 1
             fi
 
-            echo "Local health check (optional):"
-            curl -I --max-time 5 http://127.0.0.1:3000 || echo "WARN: curl to :3000 failed (check PM2 serve/preview config)"
+            PM2_PID="$(pm2 pid ZYLEARN | tr -d '[:space:]')"
+            echo "ZYLEARN pid: ${PM2_PID}"
+            if [ -z "$PM2_PID" ] || [ "$PM2_PID" = "0" ]; then
+              echo "::error::FAILED: ZYLEARN has no running PID"
+              exit 1
+            fi
+
+            echo "Local health check:"
+            if curl -I --max-time 5 http://127.0.0.1:3000; then
+              echo "curl :3000 OK"
+            else
+              echo "WARN: curl to :3000 failed — check PM2 serve/preview is listening on 3000"
+            fi
 
             echo "Deployment completed successfully (Node.js 25.9.0)."
 
