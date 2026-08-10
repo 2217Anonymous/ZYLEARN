@@ -17,6 +17,94 @@ const C = {
   red: '#E53935',
 };
 
+const PROGRAM_ITEMS = [
+  { to: '/programs', icon: Cpu, title: 'AI & LLM Mastery', desc: 'Prompt Eng, LangChain & Agents' },
+  { to: '/programs', icon: Code2, title: 'Full Stack Web Dev', desc: 'React, Node & Deploy' },
+  { to: '/programs', icon: Cloud, title: 'Data & Cloud', desc: 'AWS, GCP & Vector DB' },
+  { to: '/programs', icon: Database, title: 'CRM Sales Automation', desc: 'HubSpot, Zoho & Pipelines' },
+] as const;
+
+const WORKSHOP_ITEMS = [
+  { to: '/workshops', icon: Instagram, title: 'Instagram Workshops', desc: 'Reels, Growth & Monetization' },
+  { to: '/workshops', icon: TrendingUp, title: 'Digital Marketing', desc: 'SEO, Ads & Analytics' },
+  { to: '/workshops', icon: Rocket, title: 'Entrepreneurship', desc: 'Startup & Pitching' },
+  { to: '/workshops', icon: MapPin, title: 'Google My Business', desc: 'Local Search & Reviews' },
+] as const;
+
+type DropdownId = 'courses' | 'workshops';
+
+interface NavDropdownProps {
+  id: DropdownId;
+  label: string;
+  open: boolean;
+  activePath: boolean;
+  items: typeof PROGRAM_ITEMS | typeof WORKSHOP_ITEMS;
+  panelWidth: string;
+  linkClass: (active: boolean) => string;
+  onOpen: (id: DropdownId) => void;
+  onClose: () => void;
+}
+
+/** Stable module-level dropdown — must NOT be declared inside Navbar (remount kills hover) */
+const NavDropdown: React.FC<NavDropdownProps> = ({
+  id,
+  label,
+  open,
+  activePath,
+  items,
+  panelWidth,
+  linkClass,
+  onOpen,
+  onClose,
+}) => (
+  <div
+    className="relative"
+    onMouseEnter={() => onOpen(id)}
+    onMouseLeave={onClose}
+  >
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-haspopup="true"
+      className={`flex items-center gap-0.5 xl:gap-1 ${linkClass(open || activePath)}`}
+    >
+      {label}
+      <ChevronDown
+        className={`w-3 h-3 xl:w-3.5 xl:h-3.5 transition-transform ${open ? 'rotate-180' : ''}`}
+      />
+    </button>
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 4 }}
+          transition={{ duration: 0.15 }}
+          className={`absolute top-full left-0 pt-2 ${panelWidth} z-[200]`}
+        >
+          <div className="bg-white text-black rounded-xl shadow-2xl border border-black/5 p-2 space-y-0.5">
+            {items.map((item) => (
+              <Link
+                key={item.title}
+                to={item.to}
+                className="flex items-start gap-3 p-3 rounded-lg hover:bg-[#F5F5F5] transition-colors"
+              >
+                <div className="w-9 h-9 rounded-lg bg-[#2a2a2e] text-white flex items-center justify-center flex-shrink-0">
+                  <item.icon className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-black">{item.title}</p>
+                  <p className="text-xs text-[#666666]">{item.desc}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  </div>
+);
+
 /** Half-nav: single “Z” mark */
 const LogoZ: React.FC<{ className?: string; onNavigateHome?: (e: React.MouseEvent) => void }> = ({
   className = '',
@@ -69,8 +157,9 @@ const LogoWordmark: React.FC<{ className?: string; onNavigateHome?: (e: React.Mo
 
 export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [activeDropdown, setActiveDropdown] = useState<DropdownId | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  const closeTimer = React.useRef<number | null>(null);
   const location = useLocation();
   const isHome = location.pathname === '/';
   const halfNav = isHome && !scrolled;
@@ -95,6 +184,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    };
+  }, []);
+
   const goHome = (e: React.MouseEvent) => {
     setSideMenuOpen(false);
     setActiveDropdown(null);
@@ -105,102 +200,57 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     }
   };
 
+  const openDropdown = (id: DropdownId) => {
+    if (closeTimer.current) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setActiveDropdown(id);
+  };
+
+  const closeDropdown = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    // Tiny delay so the pointer can move into the panel without closing
+    closeTimer.current = window.setTimeout(() => {
+      setActiveDropdown(null);
+      closeTimer.current = null;
+    }, 120);
+  };
+
   const linkClass = (active: boolean) =>
     `px-2 lg:px-2.5 xl:px-3.5 2xl:px-4 py-2 text-[13px] lg:text-[13.5px] xl:text-[14px] 2xl:text-[15px] font-semibold tracking-wide transition-colors whitespace-nowrap ${
       active ? 'text-white' : 'text-white/80 hover:text-white'
     }`;
 
-  const ProgramsMenu = () => (
-    <div
-      className="relative"
-      onMouseEnter={() => setActiveDropdown('courses')}
-      onMouseLeave={() => setActiveDropdown(null)}
-    >
-      <button type="button" className={`flex items-center gap-0.5 xl:gap-1 ${linkClass(activeDropdown === 'courses' || location.pathname.includes('/programs'))}`}>
-        Programs <ChevronDown className={`w-3 h-3 xl:w-3.5 xl:h-3.5 transition-transform ${activeDropdown === 'courses' ? 'rotate-180' : ''}`} />
-      </button>
-      <AnimatePresence>
-        {activeDropdown === 'courses' && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            className="absolute top-full left-0 pt-2 w-80 z-50"
-          >
-            <div className="bg-white text-black rounded-xl shadow-2xl border border-black/5 p-2 space-y-0.5">
-              {[
-                { to: '/programs', icon: Cpu, title: 'AI & LLM Mastery', desc: 'Prompt Eng, LangChain & Agents' },
-                { to: '/programs', icon: Code2, title: 'Full Stack Web Dev', desc: 'React, Node & Deploy' },
-                { to: '/programs', icon: Cloud, title: 'Data & Cloud', desc: 'AWS, GCP & Vector DB' },
-                { to: '/programs', icon: Database, title: 'CRM Sales Automation', desc: 'HubSpot, Zoho & Pipelines' },
-              ].map((item) => (
-                <Link key={item.title} to={item.to} className="flex items-start gap-3 p-3 rounded-lg hover:bg-[#F5F5F5] transition-colors">
-                  <div className="w-9 h-9 rounded-lg bg-[#2a2a2e] text-white flex items-center justify-center flex-shrink-0">
-                    <item.icon className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-sm text-black">{item.title}</p>
-                    <p className="text-xs text-[#666666]">{item.desc}</p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-
-  const WorkshopsMenu = () => (
-    <div
-      className="relative"
-      onMouseEnter={() => setActiveDropdown('workshops')}
-      onMouseLeave={() => setActiveDropdown(null)}
-    >
-      <button type="button" className={`flex items-center gap-0.5 xl:gap-1 ${linkClass(activeDropdown === 'workshops' || location.pathname.includes('/workshops'))}`}>
-        Workshops <ChevronDown className={`w-3 h-3 xl:w-3.5 xl:h-3.5 transition-transform ${activeDropdown === 'workshops' ? 'rotate-180' : ''}`} />
-      </button>
-      <AnimatePresence>
-        {activeDropdown === 'workshops' && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            className="absolute top-full left-0 pt-2 w-96 z-50"
-          >
-            <div className="bg-white text-black rounded-xl shadow-2xl border border-black/5 p-2 space-y-0.5">
-              {[
-                { to: '/workshops', icon: Instagram, title: 'Instagram Workshops', desc: 'Reels, Growth & Monetization' },
-                { to: '/workshops', icon: TrendingUp, title: 'Digital Marketing', desc: 'SEO, Ads & Analytics' },
-                { to: '/workshops', icon: Rocket, title: 'Entrepreneurship', desc: 'Startup & Pitching' },
-                { to: '/workshops', icon: MapPin, title: 'Google My Business', desc: 'Local Search & Reviews' },
-              ].map((item) => (
-                <Link key={item.title} to={item.to} className="flex items-start gap-3 p-3 rounded-lg hover:bg-[#F5F5F5] transition-colors">
-                  <div className="w-9 h-9 rounded-lg bg-[#2a2a2e] text-white flex items-center justify-center flex-shrink-0">
-                    <item.icon className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-sm text-black">{item.title}</p>
-                    <p className="text-xs text-[#666666]">{item.desc}</p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-
-  /** Core nav links — Home always visible; click scrolls to top */
-  const NavLinks = () => (
+  /** Fresh JSX per call — laptop + desktop bars both mount (one is CSS-hidden) */
+  const renderNavLinks = () => (
     <>
       <Link to="/" onClick={goHome} className={linkClass(location.pathname === '/')}>
         Home
       </Link>
       <Link to="/about" className={linkClass(location.pathname === '/about')}>About</Link>
-      <ProgramsMenu />
-      <WorkshopsMenu />
+      <NavDropdown
+        id="courses"
+        label="Programs"
+        open={activeDropdown === 'courses'}
+        activePath={location.pathname.includes('/programs')}
+        items={PROGRAM_ITEMS}
+        panelWidth="w-80"
+        linkClass={linkClass}
+        onOpen={openDropdown}
+        onClose={closeDropdown}
+      />
+      <NavDropdown
+        id="workshops"
+        label="Workshops"
+        open={activeDropdown === 'workshops'}
+        activePath={location.pathname.includes('/workshops')}
+        items={WORKSHOP_ITEMS}
+        panelWidth="w-96"
+        linkClass={linkClass}
+        onOpen={openDropdown}
+        onClose={closeDropdown}
+      />
       <Link to="/projects" className={linkClass(location.pathname === '/projects')}>Projects</Link>
       <Link to="/contact" className={linkClass(location.pathname === '/contact')}>Contact</Link>
     </>
@@ -252,11 +302,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
   );
 
   const FullWidthBar = ({ showSocials }: { showSocials?: boolean }) => (
-    <div className="bg-[#2a2a2e] text-white shadow-lg">
-      <div className="max-w-[1400px] mx-auto flex items-center justify-between gap-2 xl:gap-3 px-4 lg:px-6 xl:px-8 h-[64px] xl:h-[72px]">
+    <div className="bg-[#2a2a2e] text-white shadow-lg overflow-visible">
+      <div className="max-w-[1400px] mx-auto flex items-center justify-between gap-2 xl:gap-3 px-4 lg:px-6 xl:px-8 h-[64px] xl:h-[72px] overflow-visible">
         <LogoWordmark onNavigateHome={goHome} />
-        <div className="flex items-center flex-1 justify-center min-w-0 gap-0 overflow-x-auto scrollbar-none">
-          <NavLinks />
+        <div className="flex items-center flex-1 justify-center min-w-0 gap-0 overflow-visible">
+          {renderNavLinks()}
         </div>
         <div className="flex items-center gap-2 xl:gap-3 flex-shrink-0">
           <CtaButton compact />
@@ -271,32 +321,36 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
   );
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50">
+    <header className="fixed top-0 left-0 right-0 z-50 overflow-visible">
       {/* Desktop / laptop */}
-      <div className="hidden lg:block">
+      <div className="hidden lg:block overflow-visible">
         {/* Laptop: stable full-width bar — no half/full remount (prevents hero flash on scroll-up) */}
-        <div className="xl:hidden">
+        <div className="xl:hidden overflow-visible">
           <FullWidthBar showSocials={scrolled} />
         </div>
 
-        {/* Wide desktop: half chrome at hero top, solid bar after scroll */}
-        <div className="hidden xl:block">
-          {halfNav ? (
-            <div className="grid grid-cols-[minmax(0,1.65fr)_minmax(0,0.85fr)] 2xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)] h-[90px] mt-16">
-              <div className="bg-[#2a2a2e] text-white flex items-center h-full min-w-0 pl-4 2xl:pl-10">
-                <LogoZ className="mr-2 2xl:mr-5" onNavigateHome={goHome} />
-                <div className="flex items-center flex-1 justify-center min-w-0 gap-0">
-                  <NavLinks />
-                </div>
-                <CtaButton stretch compact={false} />
+        {/* Wide desktop: keep both layouts mounted — CSS toggle avoids remount flash */}
+        <div className="hidden xl:block overflow-visible">
+          <div
+            className={`grid grid-cols-[minmax(0,1.65fr)_minmax(0,0.85fr)] 2xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)] h-[90px] mt-16 overflow-visible ${
+              halfNav ? '' : 'invisible pointer-events-none absolute inset-x-0 top-0'
+            }`}
+            aria-hidden={!halfNav}
+          >
+            <div className="bg-[#2a2a2e] text-white flex items-center h-full min-w-0 pl-4 2xl:pl-10 overflow-visible relative z-[60]">
+              <LogoZ className="mr-2 2xl:mr-5" onNavigateHome={goHome} />
+              <div className="flex items-center flex-1 justify-center min-w-0 gap-0 overflow-visible">
+                {renderNavLinks()}
               </div>
-              <div className="bg-transparent flex items-center justify-end h-full pr-8 2xl:pr-12">
-                <Socials dark />
-              </div>
+              <CtaButton stretch compact={false} />
             </div>
-          ) : (
+            <div className="bg-transparent flex items-center justify-end h-full pr-8 2xl:pr-12">
+              <Socials dark />
+            </div>
+          </div>
+          <div className={halfNav ? 'hidden' : 'block'}>
             <FullWidthBar showSocials />
-          )}
+          </div>
         </div>
       </div>
 
