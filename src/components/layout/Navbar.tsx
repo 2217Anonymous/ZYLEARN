@@ -18,8 +18,16 @@ const C = {
 };
 
 /** Half-nav: single “Z” mark */
-const LogoZ: React.FC<{ className?: string }> = ({ className = '' }) => (
-  <Link to="/" className={`inline-flex items-center flex-shrink-0 ${className}`} aria-label="Zylearn home">
+const LogoZ: React.FC<{ className?: string; onNavigateHome?: (e: React.MouseEvent) => void }> = ({
+  className = '',
+  onNavigateHome,
+}) => (
+  <Link
+    to="/"
+    onClick={onNavigateHome}
+    className={`inline-flex items-center flex-shrink-0 ${className}`}
+    aria-label="Zylearn home"
+  >
     <span
       className="text-white font-black leading-none select-none"
       style={{
@@ -37,9 +45,13 @@ const LogoZ: React.FC<{ className?: string }> = ({ className = '' }) => (
 );
 
 /** Full-nav: ZYLEARN + AI FOR ALL */
-const LogoWordmark: React.FC<{ className?: string }> = ({ className = '' }) => (
+const LogoWordmark: React.FC<{ className?: string; onNavigateHome?: (e: React.MouseEvent) => void }> = ({
+  className = '',
+  onNavigateHome,
+}) => (
   <Link
     to="/"
+    onClick={onNavigateHome}
     className={`inline-flex flex-col justify-center flex-shrink-0 leading-none ${className}`}
     aria-label="Zylearn home — AI For All"
   >
@@ -75,8 +87,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  const goHome = (e: React.MouseEvent) => {
+    setSideMenuOpen(false);
+    setActiveDropdown(null);
+    if (location.pathname === '/') {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setScrolled(false);
+    }
+  };
+
   const linkClass = (active: boolean) =>
-    `px-2.5 xl:px-3.5 py-2 text-[14px] xl:text-[15px] font-semibold tracking-wide transition-colors whitespace-nowrap ${
+    `px-2 lg:px-2.5 xl:px-3.5 2xl:px-4 py-2 text-[13px] lg:text-[13.5px] xl:text-[14px] 2xl:text-[15px] font-semibold tracking-wide transition-colors whitespace-nowrap ${
       active ? 'text-white' : 'text-white/80 hover:text-white'
     }`;
 
@@ -86,8 +108,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
       onMouseEnter={() => setActiveDropdown('courses')}
       onMouseLeave={() => setActiveDropdown(null)}
     >
-      <button type="button" className={`flex items-center gap-1 ${linkClass(activeDropdown === 'courses' || location.pathname.includes('/programs'))}`}>
-        Programs <ChevronDown className={`w-3.5 h-3.5 transition-transform ${activeDropdown === 'courses' ? 'rotate-180' : ''}`} />
+      <button type="button" className={`flex items-center gap-0.5 xl:gap-1 ${linkClass(activeDropdown === 'courses' || location.pathname.includes('/programs'))}`}>
+        Programs <ChevronDown className={`w-3 h-3 xl:w-3.5 xl:h-3.5 transition-transform ${activeDropdown === 'courses' ? 'rotate-180' : ''}`} />
       </button>
       <AnimatePresence>
         {activeDropdown === 'courses' && (
@@ -127,8 +149,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
       onMouseEnter={() => setActiveDropdown('workshops')}
       onMouseLeave={() => setActiveDropdown(null)}
     >
-      <button type="button" className={`flex items-center gap-1 ${linkClass(activeDropdown === 'workshops' || location.pathname.includes('/workshops'))}`}>
-        Workshops <ChevronDown className={`w-3.5 h-3.5 transition-transform ${activeDropdown === 'workshops' ? 'rotate-180' : ''}`} />
+      <button type="button" className={`flex items-center gap-0.5 xl:gap-1 ${linkClass(activeDropdown === 'workshops' || location.pathname.includes('/workshops'))}`}>
+        Workshops <ChevronDown className={`w-3 h-3 xl:w-3.5 xl:h-3.5 transition-transform ${activeDropdown === 'workshops' ? 'rotate-180' : ''}`} />
       </button>
       <AnimatePresence>
         {activeDropdown === 'workshops' && (
@@ -162,16 +184,39 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     </div>
   );
 
+  /** Core nav links — Home always visible; click scrolls to top */
   const NavLinks = () => (
     <>
-      <Link to="/" className={linkClass(location.pathname === '/')}>Home</Link>
+      <Link to="/" onClick={goHome} className={linkClass(location.pathname === '/')}>
+        Home
+      </Link>
       <Link to="/about" className={linkClass(location.pathname === '/about')}>About</Link>
       <ProgramsMenu />
       <WorkshopsMenu />
       <Link to="/projects" className={linkClass(location.pathname === '/projects')}>Projects</Link>
       <Link to="/contact" className={linkClass(location.pathname === '/contact')}>Contact</Link>
-      <Link to="/career" className={linkClass(location.pathname === '/career')}>Career</Link>
     </>
+  );
+
+  const CtaButton = ({
+    stretch,
+    compact,
+  }: {
+    stretch?: boolean;
+    compact?: boolean;
+  }) => (
+    <button
+      type="button"
+      onClick={onJoinClick}
+      className={
+        stretch
+          ? 'flex-shrink-0 self-stretch px-3 xl:px-5 2xl:px-7 text-[10px] xl:text-[11px] 2xl:text-xs font-bold uppercase tracking-wider text-white'
+          : 'inline-flex items-center justify-center px-3.5 xl:px-5 py-2.5 text-[10px] xl:text-xs font-bold uppercase tracking-wider text-white flex-shrink-0'
+      }
+      style={{ backgroundColor: C.red }}
+    >
+      {compact ? 'Book Now' : 'Book Spot Now'}
+    </button>
   );
 
   const Socials = ({ dark }: { dark?: boolean }) => (
@@ -198,71 +243,77 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     </div>
   );
 
+  const FullWidthBar = ({ showSocials }: { showSocials?: boolean }) => (
+    <div className="bg-[#2a2a2e] text-white shadow-lg">
+      <div className="max-w-[1400px] mx-auto flex items-center justify-between gap-2 xl:gap-3 px-4 lg:px-6 xl:px-8 h-[64px] xl:h-[72px]">
+        <LogoWordmark onNavigateHome={goHome} />
+        <div className="flex items-center flex-1 justify-center min-w-0 gap-0 overflow-x-auto scrollbar-none">
+          <NavLinks />
+        </div>
+        <div className="flex items-center gap-2 xl:gap-3 flex-shrink-0">
+          <CtaButton compact />
+          {showSocials && (
+            <div className="hidden 2xl:flex items-center border-l border-white/20 pl-3">
+              <Socials />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <header className="fixed top-0 left-0 right-0 z-50">
-      {/* Desktop */}
+      {/* Desktop / laptop */}
       <div className="hidden lg:block">
         <AnimatePresence mode="wait">
           {halfNav ? (
-            /* —— Half black menu (left) + socials (right) — reference layout —— */
-            <motion.div
-              key="half"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="grid grid-cols-2 h-[90px] mt-16"
-            >
-              <div className="bg-[#2a2a2e] text-white flex items-center h-full pl-6 xl:pl-10">
-                <LogoZ className="mr-3 xl:mr-5" />
+            <>
+              {/* Laptop (lg–xl): full-width bar — half panel overloads at ~1024–1280px */}
+              <motion.div
+                key="half-laptop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="xl:hidden"
+              >
+                <FullWidthBar />
+              </motion.div>
 
-                <div className="flex items-center flex-1 justify-center min-w-0 gap-0 overflow-visible">
-                  <NavLinks />
+              {/* Wide desktop (xl+): original half black + socials layout */}
+              <motion.div
+                key="half"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="hidden xl:grid grid-cols-[minmax(0,1.65fr)_minmax(0,0.85fr)] 2xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)] h-[90px] mt-16"
+              >
+                <div className="bg-[#2a2a2e] text-white flex items-center h-full min-w-0 pl-4 2xl:pl-10">
+                  <LogoZ className="mr-2 2xl:mr-5" onNavigateHome={goHome} />
+
+                  <div className="flex items-center flex-1 justify-center min-w-0 gap-0">
+                    <NavLinks />
+                  </div>
+
+                  <CtaButton stretch compact={false} />
                 </div>
 
-                <button
-                  type="button"
-                  onClick={onJoinClick}
-                  className="flex-shrink-0 self-stretch px-5 xl:px-7 text-[11px] xl:text-xs font-bold uppercase tracking-wider text-white"
-                  style={{ backgroundColor: C.red }}
-                >
-                  Book Spot Now
-                </button>
-              </div>
-
-              <div className="bg-transparent flex items-center justify-end h-full pr-8 xl:pr-12">
-                <Socials dark />
-              </div>
-            </motion.div>
+                <div className="bg-transparent flex items-center justify-end h-full pr-8 2xl:pr-12">
+                  <Socials dark />
+                </div>
+              </motion.div>
+            </>
           ) : (
-            /* —— Full black bar after scroll / other pages —— */
             <motion.nav
               key="full"
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.22 }}
-              className="bg-[#2a2a2e] text-white shadow-lg"
             >
-              <div className="max-w-[1400px] mx-auto flex items-center justify-between gap-3 px-6 lg:px-8 h-[72px]">
-                <LogoWordmark />
-                <div className="flex items-center flex-1 justify-center gap-0.5">
-                  <NavLinks />
-                </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={onJoinClick}
-                    className="inline-flex items-center justify-center px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white"
-                    style={{ backgroundColor: C.red }}
-                  >
-                    Book Spot Now
-                  </button>
-                  <div className="hidden xl:flex items-center border-l border-white/20 pl-3">
-                    <Socials />
-                  </div>
-                </div>
-              </div>
+              <FullWidthBar showSocials />
             </motion.nav>
           )}
         </AnimatePresence>
@@ -271,7 +322,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
       {/* Mobile — solid bar */}
       <nav className="lg:hidden bg-[#2a2a2e] text-white">
         <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-[64px]">
-          <LogoWordmark />
+          <LogoWordmark onNavigateHome={goHome} />
           <div className="flex items-center gap-2">
             <a
               href={CONTACT.whatsappUrl}
@@ -304,13 +355,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
             className="lg:hidden bg-[#2a2a2e] text-white border-t border-white/10 overflow-hidden"
           >
             <div className="px-6 py-6 space-y-4">
-              <Link to="/" onClick={() => setSideMenuOpen(false)} className="block font-semibold">Home</Link>
+              <Link to="/" onClick={goHome} className="block font-semibold">Home</Link>
               <Link to="/about" onClick={() => setSideMenuOpen(false)} className="block font-semibold">About</Link>
               <Link to="/programs" onClick={() => setSideMenuOpen(false)} className="block font-semibold">Programs</Link>
               <Link to="/workshops" onClick={() => setSideMenuOpen(false)} className="block font-semibold">Workshops</Link>
               <Link to="/projects" onClick={() => setSideMenuOpen(false)} className="block font-semibold">Projects</Link>
               <Link to="/contact" onClick={() => setSideMenuOpen(false)} className="block font-semibold">Contact</Link>
-              <Link to="/career" onClick={() => setSideMenuOpen(false)} className="block font-semibold">Career</Link>
               <button
                 type="button"
                 onClick={() => { setSideMenuOpen(false); onJoinClick(); }}
