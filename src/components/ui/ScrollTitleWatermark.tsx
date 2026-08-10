@@ -1,12 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 
 /**
  * Global title watermark:
  * scroll down → moves left → right
  * scroll up   → moves right → left
+ *
+ * Uses a DOM ref (no React setState on scroll) so Home/Hero do not re-render
+ * while scrolling — that re-render was causing a white flash on the hero.
  */
 export const ScrollTitleWatermark: React.FC = () => {
-  const [xVw, setXVw] = useState(0);
+  const layerRef = useRef<HTMLDivElement>(null);
   const lastY = useRef(typeof window !== 'undefined' ? window.scrollY : 0);
   const xRef = useRef(0);
   const raf = useRef(0);
@@ -14,20 +17,25 @@ export const ScrollTitleWatermark: React.FC = () => {
   useEffect(() => {
     lastY.current = window.scrollY;
 
+    const apply = () => {
+      const el = layerRef.current;
+      if (el) {
+        el.style.transform = `translate3d(${xRef.current}vw, 0, 0)`;
+      }
+    };
+
     const onScroll = () => {
       const y = window.scrollY;
       const delta = y - lastY.current;
       lastY.current = y;
       if (delta === 0) return;
 
-      // Accumulate: down increases x (LTR), up decreases x (RTL)
-      const next = Math.max(-55, Math.min(55, xRef.current + delta * 0.08));
-      xRef.current = next;
-
+      xRef.current = Math.max(-55, Math.min(55, xRef.current + delta * 0.08));
       cancelAnimationFrame(raf.current);
-      raf.current = requestAnimationFrame(() => setXVw(xRef.current));
+      raf.current = requestAnimationFrame(apply);
     };
 
+    apply();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       window.removeEventListener('scroll', onScroll);
@@ -41,11 +49,9 @@ export const ScrollTitleWatermark: React.FC = () => {
       aria-hidden
     >
       <div
+        ref={layerRef}
         className="text-center select-none will-change-transform"
-        style={{
-          transform: `translate3d(${xVw}vw, 0, 0)`,
-          transition: 'transform 0.12s linear',
-        }}
+        style={{ transform: 'translate3d(0, 0, 0)' }}
       >
         <p
           className="font-black uppercase tracking-[-0.04em] leading-[0.88] whitespace-nowrap"
