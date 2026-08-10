@@ -1,10 +1,13 @@
 name: Deploy to EC2
 
+# Production deploy ONLY from main.
+# Pushing to develop (or any other branch) will NOT deploy.
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+    # Manual runs should still target main; the job guard below enforces this.
 
 concurrency:
   group: deploy-production
@@ -13,8 +16,11 @@ concurrency:
 jobs:
   deploy:
     name: Deploy ZYLEARN to EC2
+    # Extra safety: never deploy unless the workflow is running on main
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: production
 
     steps:
       - name: Validate required secrets
