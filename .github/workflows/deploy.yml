@@ -7,6 +7,7 @@ on:
     branches:
       - main
   workflow_dispatch:
+    # Manual runs should still target main; the job guard below enforces this.
 
 concurrency:
   group: deploy-production
@@ -15,6 +16,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy ZYLEARN to EC2
+    # Extra safety: never deploy unless the workflow is running on main
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
