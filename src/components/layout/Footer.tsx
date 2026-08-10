@@ -4,6 +4,7 @@ import {
   Mail, Phone, MapPin, Instagram, Youtube, Linkedin,
   Facebook, ArrowUp, CheckCircle2, Zap,
 } from 'lucide-react';
+import { CONTACT } from '@/data/contact';
 
 interface FooterProps {
   onJoinClick?: () => void;
@@ -116,14 +117,16 @@ export const Footer: React.FC<FooterProps> = ({ onJoinClick }) => {
 
               <div className="flex items-center gap-2">
                 {[
-                  { Icon: Facebook, label: 'Facebook' },
-                  { Icon: Instagram, label: 'Instagram' },
-                  { Icon: Youtube, label: 'YouTube' },
-                  { Icon: Linkedin, label: 'LinkedIn' },
-                ].map(({ Icon, label }) => (
+                  { Icon: Facebook, label: 'Facebook', href: '#' },
+                  { Icon: Instagram, label: 'Instagram', href: CONTACT.instagramUrl },
+                  { Icon: Youtube, label: 'YouTube', href: '#' },
+                  { Icon: Linkedin, label: 'LinkedIn', href: '#' },
+                ].map(({ Icon, label, href }) => (
                   <a
                     key={label}
-                    href="#"
+                    href={href}
+                    target={href.startsWith('http') ? '_blank' : undefined}
+                    rel={href.startsWith('http') ? 'noreferrer' : undefined}
                     aria-label={label}
                     className="w-9 h-9 flex items-center justify-center border border-white/20 text-white/60 hover:border-[#F5C518] hover:text-[#F5C518] transition-colors"
                   >
@@ -176,9 +179,17 @@ export const Footer: React.FC<FooterProps> = ({ onJoinClick }) => {
                     <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-white/35 mb-0.5">
                       Phone
                     </p>
-                    <a href="tel:+919876543210" className="text-white/80 hover:text-[#F5C518] transition-colors">
-                      +91 98765 43210
-                    </a>
+                    <div className="flex flex-col gap-0.5">
+                      {CONTACT.phones.map((p) => (
+                        <a
+                          key={p.tel}
+                          href={p.tel}
+                          className="text-white/80 hover:text-[#F5C518] transition-colors"
+                        >
+                          {p.display}
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 </li>
                 <li className="flex items-start gap-3 text-sm">
@@ -188,10 +199,10 @@ export const Footer: React.FC<FooterProps> = ({ onJoinClick }) => {
                       Email
                     </p>
                     <a
-                      href="mailto:admissions@zylearn.com"
+                      href={CONTACT.emailMailto}
                       className="text-white/80 hover:text-[#F5C518] transition-colors"
                     >
-                      admissions@zylearn.com
+                      {CONTACT.email}
                     </a>
                   </div>
                 </li>
@@ -201,7 +212,7 @@ export const Footer: React.FC<FooterProps> = ({ onJoinClick }) => {
                     <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-white/35 mb-0.5">
                       Address
                     </p>
-                    <p className="text-white/80">Innovation Hub, Bengaluru</p>
+                    <p className="text-white/80">{CONTACT.address}</p>
                   </div>
                 </li>
               </ul>

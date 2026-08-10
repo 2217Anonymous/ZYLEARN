@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, Phone, MapPin, Send, CheckCircle2, Clock } from 'lucide-react';
 import { SectionShell } from '@/components/ui/SectionShell';
+import { CONTACT } from '@/data/contact';
 
 const fieldClass =
   'w-full px-4 py-3.5 bg-[#ededed] border border-[#2a2a2e]/12 text-sm text-[#2a2a2e] outline-none focus:border-[#E53935] transition-colors placeholder:text-[#2a2a2e]/35';
@@ -42,9 +43,14 @@ export const ContactPage: React.FC = () => {
               <h3 className="text-xl font-black text-[#2a2a2e] uppercase tracking-tight">Contact Details</h3>
               <div className="space-y-6">
                 {[
-                  { icon: MapPin, label: 'Campus', value: 'Zylearn Innovation Hub, Bengaluru', accent: '#E53935' },
-                  { icon: Phone, label: 'Phone & WhatsApp', value: '+91 98765 43210', accent: '#F5C518' },
-                  { icon: Mail, label: 'Admissions', value: 'admissions@zylearn.com', accent: '#E53935' },
+                  { icon: MapPin, label: 'Campus', value: CONTACT.address, accent: '#E53935' },
+                  {
+                    icon: Phone,
+                    label: 'Phone & WhatsApp',
+                    value: CONTACT.phones.map((p) => p.display).join(' · '),
+                    accent: '#F5C518',
+                  },
+                  { icon: Mail, label: 'Email', value: CONTACT.email, accent: '#E53935' },
                 ].map((item) => {
                   const Icon = item.icon;
                   return (
@@ -143,7 +149,7 @@ export const ContactPage: React.FC = () => {
                       <input
                         type="tel"
                         required
-                        placeholder="+91 98765 43210"
+                        placeholder="+91 8825505169"
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                         className={fieldClass}

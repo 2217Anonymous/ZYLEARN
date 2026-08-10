@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Zap, Phone, Mail, CheckCircle2, Send } from 'lucide-react';
 import { ASSETS } from '@/data/assets';
+import { CONTACT } from '@/data/contact';
 import { SectionShell } from '@/components/ui/SectionShell';
 import { MiniCodeScroll } from '@/components/ui/DemoWatermark';
 
@@ -62,11 +63,11 @@ export const EarlyBirdCTA: React.FC<EarlyBirdCTAProps> = ({ onJoinClick }) => {
             <div className="pt-6 border-t border-white/10 flex flex-wrap gap-6 text-sm text-white/70">
               <div className="flex items-center gap-2">
                 <Phone className="w-4 h-4 text-[#F5C518]" />
-                +91 98765 43210
+                {CONTACT.primaryPhoneDisplay}
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-[#E53935]" />
-                admissions@zylearn.com
+                {CONTACT.email}
               </div>
             </div>
             </div>

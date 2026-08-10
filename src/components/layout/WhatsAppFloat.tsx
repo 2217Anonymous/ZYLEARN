@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { MessageCircle, X, Send, Instagram, Phone, Mail } from 'lucide-react';
+import { CONTACT } from '@/data/contact';
 
 type Msg =
   | { id: string; role: 'bot'; text: string }
@@ -20,10 +21,10 @@ const CHOICES: Array<{ label: string; action: 'whatsapp' | 'instagram' | 'gmail'
   { label: 'Contact form', action: 'contact' },
 ];
 
-const WA = 'https://wa.me/919876543210';
-const IG = 'https://instagram.com';
-const PHONE = 'tel:+919876543210';
-const MAIL = 'mailto:admissions@zylearn.com';
+const WA = CONTACT.whatsappUrl;
+const IG = CONTACT.instagramUrl;
+const PHONE = CONTACT.primaryPhoneTel;
+const MAIL = CONTACT.emailMailto;
 
 const FLOAT_ICONS = [
   {
@@ -152,7 +153,7 @@ export const WhatsAppFloat: React.FC = () => {
         const followUps: Record<string, string> = {
           whatsapp: 'Opening WhatsApp… talk to admissions there.',
           instagram: 'Taking you to Instagram — follow Zylearn updates.',
-          gmail: 'Opening Gmail to admissions@zylearn.com.',
+          gmail: `Opening Gmail to ${CONTACT.email}.`,
           contact: 'Opening our Contact page for you.',
         };
         setMsgs((prev) => [
@@ -176,17 +177,48 @@ export const WhatsAppFloat: React.FC = () => {
   };
 
   return (
-    <div className="fixed bottom-5 right-5 sm:bottom-6 sm:right-6 z-[60] flex flex-col items-end gap-3">
-      {/* Chat panel */}
+    <div className="fixed bottom-5 right-5 z-[60] flex flex-col items-end gap-2.5 sm:bottom-6 sm:right-6">
+      {/* Vertical float icons — hide while chat is open so panel sits by the X */}
+      <AnimatePresence>
+        {!open && (
+          <motion.div
+            key="float-icons"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.18 }}
+            className="flex flex-col items-center gap-2.5"
+          >
+            {FLOAT_ICONS.map((item, i) => (
+              <motion.a
+                key={item.id}
+                href={item.href}
+                target={item.id === 'phone' || item.id === 'gmail' ? undefined : '_blank'}
+                rel={item.id === 'phone' || item.id === 'gmail' ? undefined : 'noreferrer'}
+                aria-label={item.label}
+                initial={{ opacity: 0, y: 10, scale: 0.85 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ delay: i * 0.06, duration: 0.25 }}
+                className="flex h-11 w-11 items-center justify-center rounded-full text-white shadow-[0_6px_18px_rgba(42,42,46,0.22)] transition-transform hover:scale-110 active:scale-95"
+                style={{ backgroundColor: item.color }}
+              >
+                {item.icon}
+              </motion.a>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Chat panel — anchored just above the toggle (X) */}
       <AnimatePresence>
         {open && (
           <motion.div
             key="chat"
-            initial={{ opacity: 0, y: 20, scale: 0.96 }}
+            initial={{ opacity: 0, y: 16, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 14, scale: 0.96 }}
+            exit={{ opacity: 0, y: 12, scale: 0.96 }}
             transition={{ duration: 0.22 }}
-            className="flex h-[min(62vh,400px)] w-[min(100vw-2.5rem,22rem)] flex-col overflow-hidden rounded-2xl border border-[#2a2a2e]/12 bg-[#ededed] shadow-[0_18px_50px_rgba(42,42,46,0.22)]"
+            className="mb-1 flex h-[min(62vh,400px)] w-[min(100vw-2.5rem,22rem)] flex-col overflow-hidden rounded-2xl border border-[#2a2a2e]/12 bg-[#ededed] shadow-[0_18px_50px_rgba(42,42,46,0.22)]"
           >
             <div className="flex items-center gap-3 bg-[#2a2a2e] px-4 py-3 text-white">
               <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#E53935] text-sm font-black">
@@ -282,41 +314,21 @@ export const WhatsAppFloat: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Vertical float icons ABOVE chat button */}
-      <div className="flex flex-col items-center gap-2.5">
-        {FLOAT_ICONS.map((item, i) => (
-          <motion.a
-            key={item.id}
-            href={item.href}
-            target={item.id === 'phone' || item.id === 'gmail' ? undefined : '_blank'}
-            rel={item.id === 'phone' || item.id === 'gmail' ? undefined : 'noreferrer'}
-            aria-label={item.label}
-            initial={{ opacity: 0, y: 10, scale: 0.85 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ delay: i * 0.06, duration: 0.25 }}
-            className="flex h-11 w-11 items-center justify-center rounded-full text-white shadow-[0_6px_18px_rgba(42,42,46,0.22)] transition-transform hover:scale-110 active:scale-95"
-            style={{ backgroundColor: item.color }}
-          >
-            {item.icon}
-          </motion.a>
-        ))}
-
-        {/* Chat bot toggle — bottom of the vertical stack */}
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-label={open ? 'Close chat' : 'Open Zylearn chat'}
-          className="flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_24px_rgba(42,42,46,0.35)] transition-transform hover:scale-105 active:scale-95"
-          style={{ backgroundColor: open ? '#2a2a2e' : '#E53935' }}
-        >
-          {open ? (
-            <X className="h-6 w-6" />
-          ) : (
-            <MessageCircle className="h-7 w-7" fill="currentColor" strokeWidth={0} />
-          )}
-        </button>
-      </div>
+      {/* Chat toggle — stays at bottom-right; panel opens directly above it */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={open ? 'Close chat' : 'Open Zylearn chat'}
+        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white shadow-[0_8px_24px_rgba(42,42,46,0.35)] transition-transform hover:scale-105 active:scale-95"
+        style={{ backgroundColor: open ? '#2a2a2e' : '#E53935' }}
+      >
+        {open ? (
+          <X className="h-6 w-6" />
+        ) : (
+          <MessageCircle className="h-7 w-7" fill="currentColor" strokeWidth={0} />
+        )}
+      </button>
     </div>
   );
 };

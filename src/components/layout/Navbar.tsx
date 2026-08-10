@@ -6,6 +6,7 @@ import {
   Linkedin, Facebook, Twitter, MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { CONTACT } from '@/data/contact';
 
 interface NavbarProps {
   onJoinClick: () => void;
@@ -181,11 +182,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
       <a href="https://twitter.com" target="_blank" rel="noreferrer" className={`w-9 h-9 flex items-center justify-center transition-colors ${dark ? 'text-black/70 hover:text-black' : 'text-white/80 hover:text-white'}`} aria-label="Twitter">
         <Twitter className="w-4 h-4" />
       </a>
-      <a href="https://instagram.com" target="_blank" rel="noreferrer" className={`w-9 h-9 flex items-center justify-center transition-colors ${dark ? 'text-black/70 hover:text-black' : 'text-white/80 hover:text-white'}`} aria-label="Instagram">
+      <a href={CONTACT.instagramUrl} target="_blank" rel="noreferrer" className={`w-9 h-9 flex items-center justify-center transition-colors ${dark ? 'text-black/70 hover:text-black' : 'text-white/80 hover:text-white'}`} aria-label="Instagram">
         <Instagram className="w-4 h-4" />
       </a>
       <a
-        href="https://wa.me/919876543210"
+        href={CONTACT.whatsappUrl}
         target="_blank"
         rel="noreferrer"
         className="w-9 h-9 rounded-full flex items-center justify-center text-white ml-1.5 shadow-md"
@@ -273,7 +274,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
           <LogoWordmark />
           <div className="flex items-center gap-2">
             <a
-              href="https://wa.me/919876543210"
+              href={CONTACT.whatsappUrl}
               target="_blank"
               rel="noreferrer"
               className="w-9 h-9 rounded-full flex items-center justify-center text-white"
