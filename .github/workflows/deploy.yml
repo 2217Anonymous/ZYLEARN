@@ -1,7 +1,7 @@
 name: Deploy to EC2
 
 # Production deploy ONLY from main.
-# Architecture: SSH to EC2 → build with Node 22 → pm2 restart ZYLEARN
+# Architecture: SSH to EC2 → NVM → Node.js 25.9.0 → npm ci/build → pm2 restart ZYLEARN
 # Pushing to develop (or any other branch) will NOT deploy.
 on:
   push:
@@ -10,8 +10,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-production
+  group: production-deployment
   cancel-in-progress: false
+
+env:
+  NODE_PIN: "25.9.0"
 
 jobs:
   deploy:
@@ -49,36 +52,33 @@ jobs:
             echo "Fix: add the missing secrets, then re-run this workflow."
             exit 1
           fi
-
           echo "All required secrets are present. Continuing deployment..."
 
       - name: Checkout repository (for Node pin / npm cache)
         uses: actions/checkout@v4
 
-      # Pin Node 22 on the GitHub runner (project standard). Build still runs on EC2.
-      - name: Setup Node.js 22 (GitHub runner)
+      - name: Setup Node.js 25.9.0 (GitHub runner)
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "25.9.0"
           cache: npm
 
-      - name: Verify GitHub runner Node.js 22
+      - name: Verify GitHub runner Node.js 25.9.0
         run: |
           set -euo pipefail
           echo "Node version:"
           node -v
           echo "NPM version:"
           npm -v
-          node_major="$(node -p "process.versions.node.split('.')[0]")"
-          if [ "$node_major" != "22" ]; then
-            echo "::error::ERROR: Node.js 22 is required on the GitHub runner. Found: $(node -v)"
+          if [ "$(node -v)" != "v25.9.0" ]; then
+            echo "::error::ERROR: Expected Node.js v25.9.0 on the GitHub runner. Found: $(node -v)"
             exit 1
           fi
           if [ -f .nvmrc ]; then
             echo ".nvmrc:"
             cat .nvmrc
           fi
-          echo "GitHub runner Node.js 22 OK"
+          echo "GitHub runner Node.js 25.9.0 OK"
 
       # ── 1) SSH connection test ──────────────────────────────────────────
       - name: SSH connection test
@@ -93,16 +93,13 @@ jobs:
           script: |
             set -e
             echo "STEP: SSH connection test"
-            echo "COMMAND: whoami"
             whoami
-            echo "COMMAND: hostname"
             hostname
-            echo "COMMAND: date -u"
             date -u
             echo "SSH connection OK"
 
-      # ── 2) Ensure + verify Node.js 22 on EC2 ────────────────────────────
-      - name: Ensure Node.js 22 on EC2
+      # ── 2) Load NVM + verify Node.js 25.9.0 (no auto-install) ───────────
+      - name: Ensure Node.js 25.9.0 on EC2 via NVM
         id: check_tools
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -110,61 +107,105 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
-          command_timeout: 10m
+          command_timeout: 5m
           script: |
             set -e
-            echo "STEP: Ensure Node.js 22 on EC2"
-            echo "COMMAND: whoami && pwd"
+            echo "STEP: Load NVM and use Node.js 25.9.0"
             whoami
             pwd
 
+            echo "Loading NVM..."
             export NVM_DIR="$HOME/.nvm"
             if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-              echo "::error::FAILED: nvm not found at $HOME/.nvm"
+              echo "::error::ERROR: NVM is not installed for the deployment user."
               echo "FIX (one-time on EC2 as ubuntu):"
               echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
-              echo "  # then re-run this workflow"
+              echo "  . \"\$HOME/.nvm/nvm.sh\""
+              echo "  nvm install 25.9.0"
+              echo "  nvm alias default 25.9.0"
               exit 1
             fi
             # shellcheck disable=SC1091
             . "$NVM_DIR/nvm.sh"
-            echo "Loaded nvm from $NVM_DIR/nvm.sh"
+            echo "NVM loaded from $NVM_DIR/nvm.sh"
 
-            echo "COMMAND: nvm install 22 (if needed) && nvm use 22 && nvm alias default 22"
-            nvm install 22
-            nvm use 22
-            nvm alias default 22
+            echo "Using Node.js 25.9.0..."
+            if ! nvm use 25.9.0; then
+              echo "::error::ERROR: Node.js 25.9.0 is not installed in NVM."
+              echo "FIX (one-time on EC2 — do NOT install during every deploy):"
+              echo "  . \"\$HOME/.nvm/nvm.sh\""
+              echo "  nvm install 25.9.0"
+              echo "  nvm use 25.9.0"
+              echo "  nvm alias default 25.9.0"
+              exit 1
+            fi
 
             echo "Node version:"
             node -v
             echo "NPM version:"
             npm -v
+            echo "Node location:"
+            which node
+            echo "NPM location:"
+            which npm
 
-            node_major="$(node -p "process.versions.node.split('.')[0]")"
-            if [ "$node_major" != "22" ]; then
-              echo "::error::ERROR: Node.js 22 is required. Found: $(node -v)"
-              echo "FIX: nvm install 22 && nvm use 22 && nvm alias default 22"
+            NODE_VERSION="$(node -v)"
+            if [ "$NODE_VERSION" != "v25.9.0" ]; then
+              echo "::error::ERROR: Incorrect Node.js version."
+              echo "Expected: v25.9.0"
+              echo "Found: $NODE_VERSION"
               exit 1
             fi
 
-            echo "COMMAND: git --version"
+            # Shared helper for later steps (SSH is non-login; NVM must be loaded each time)
+            tee /tmp/zylearn_use_node259.sh >/dev/null << 'NODE_EOF'
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+              echo "ERROR: NVM is not installed for the deployment user."
+              exit 1
+            fi
+            . "$NVM_DIR/nvm.sh"
+            if ! nvm use 25.9.0; then
+              echo "ERROR: Node.js 25.9.0 is unavailable in NVM."
+              exit 1
+            fi
+            echo "Node version:"
+            node -v
+            echo "NPM version:"
+            npm -v
+            echo "Node location:"
+            which node
+            echo "NPM location:"
+            which npm
+            NODE_VERSION="$(node -v)"
+            if [ "$NODE_VERSION" != "v25.9.0" ]; then
+              echo "ERROR: Incorrect Node.js version."
+              echo "Expected: v25.9.0"
+              echo "Found: $NODE_VERSION"
+              exit 1
+            fi
+            NODE_EOF
+            sed -i 's/^[[:space:]]*//' /tmp/zylearn_use_node259.sh
+            chmod 755 /tmp/zylearn_use_node259.sh
+            # shellcheck disable=SC1091
+            . /tmp/zylearn_use_node259.sh
+
             if ! command -v git >/dev/null 2>&1; then
               echo "::error::FAILED command: git --version"
               echo "FIX: sudo apt-get install -y git"
               exit 1
             fi
-            git --version
+            echo "Git version: $(git --version)"
 
-            echo "COMMAND: pm2 -v"
             if ! command -v pm2 >/dev/null 2>&1; then
               echo "::error::FAILED command: pm2 -v"
-              echo "FIX (under Node 22): npm install -g pm2"
+              echo "FIX under Node 25.9.0: npm install -g pm2"
               exit 1
             fi
-            pm2 -v
-            echo "which node: $(command -v node)"
-            echo "which pm2: $(command -v pm2)"
-            echo "EC2 Node.js 22 tooling check OK"
+            echo "PM2 version: $(pm2 -v)"
+            echo "which pm2: $(which pm2)"
+            echo "EC2 Node.js 25.9.0 tooling check OK"
 
       # ── 3) Application directory + package files ────────────────────────
       - name: Check application directory and package files
@@ -185,30 +226,26 @@ jobs:
 
             if [ -z "${APP_PATH}" ]; then
               echo "::error::FAILED: EC2_APP_PATH secret is empty"
-              echo "FIX: Set GitHub secret EC2_APP_PATH=/var/www/ZYLEARN"
               exit 1
             fi
 
-            echo "COMMAND: test -d \"\$APP_PATH\""
             if [ ! -d "${APP_PATH}" ]; then
               echo "::error::FAILED command: test -d \$APP_PATH"
-              echo "FIX: Create/clone the app on EC2, then: sudo chown -R ubuntu:ubuntu /var/www/ZYLEARN"
+              echo "FIX: sudo chown -R ubuntu:ubuntu /var/www/ZYLEARN (once)"
               exit 1
             fi
 
-            echo "COMMAND: test -f \"\$APP_PATH/package.json\""
             if [ ! -f "${APP_PATH}/package.json" ]; then
               echo "::error::FAILED command: test -f \$APP_PATH/package.json"
               exit 1
             fi
 
-            echo "COMMAND: test -f \"\$APP_PATH/package-lock.json\""
             if [ ! -f "${APP_PATH}/package-lock.json" ]; then
               echo "::error::FAILED command: test -f \$APP_PATH/package-lock.json"
+              echo "FIX: commit package-lock.json on main (required for npm ci)"
               exit 1
             fi
 
-            echo "COMMAND: test -d \"\$APP_PATH/.git\""
             if [ ! -d "${APP_PATH}/.git" ]; then
               echo "::error::FAILED command: test -d \$APP_PATH/.git"
               exit 1
@@ -216,12 +253,12 @@ jobs:
 
             ls -la "${APP_PATH}/package.json" "${APP_PATH}/package-lock.json"
             if [ -f "${APP_PATH}/.nvmrc" ]; then
-              echo ".nvmrc contents:"
+              echo ".nvmrc:"
               cat "${APP_PATH}/.nvmrc"
             fi
             echo "Application directory check OK"
 
-      # ── 4) Git status + pull latest main ────────────────────────────────
+      # ── 4) Git pull latest main ─────────────────────────────────────────
       - name: Check Git status and pull latest main
         id: git_pull
         uses: appleboy/ssh-action@v1.2.0
@@ -246,14 +283,13 @@ jobs:
             echo "Previous commit: ${PREV_SHA}"
             echo "Target GitHub commit: ${GIT_SHA}"
 
-            echo "COMMAND: git fetch origin main"
+            echo "Fetching latest code..."
             if ! git fetch origin main; then
               echo "::error::FAILED command: git fetch origin main"
-              echo "FIX: Configure GitHub auth on EC2 (deploy key / SSH remote)."
+              echo "FIX: configure GitHub auth on EC2 (deploy key / SSH remote)."
               exit 1
             fi
 
-            echo "COMMAND: git reset --hard origin/main"
             if ! git reset --hard origin/main; then
               echo "::error::FAILED command: git reset --hard origin/main"
               echo "FIX: sudo chown -R ubuntu:ubuntu /var/www/ZYLEARN"
@@ -263,11 +299,9 @@ jobs:
             DEPLOY_SHA="$(git rev-parse HEAD)"
             echo "Now at commit: ${DEPLOY_SHA}"
             git status -sb
-            echo "${PREV_SHA}" > /tmp/zylearn_prev_sha
-            echo "${DEPLOY_SHA}" > /tmp/zylearn_deploy_sha
-            echo "Git pull OK"
+            echo "Git pull OK (tracked files only; gitignored .env* preserved)"
 
-      # ── 5) npm ci (Node 22) ─────────────────────────────────────────────
+      # ── 5) npm ci ───────────────────────────────────────────────────────
       - name: npm ci
         id: npm_ci
         uses: appleboy/ssh-action@v1.2.0
@@ -283,25 +317,18 @@ jobs:
           script: |
             set -e
             echo "STEP: npm ci"
-            export NVM_DIR="$HOME/.nvm"
             # shellcheck disable=SC1091
-            . "$NVM_DIR/nvm.sh"
-            nvm use 22
-
-            echo "Node version:"
-            node -v
-            echo "NPM version:"
-            npm -v
-            node_major="$(node -p "process.versions.node.split('.')[0]")"
-            if [ "$node_major" != "22" ]; then
-              echo "::error::ERROR: Node.js 22 is required before npm ci. Found: $(node -v)"
-              exit 1
-            fi
+            . /tmp/zylearn_use_node259.sh
 
             cd "${APP_PATH}"
             pwd
 
-            echo "COMMAND: npm ci"
+            if [ ! -f package-lock.json ]; then
+              echo "::error::FAILED: package-lock.json missing — refusing npm install fallback in production"
+              exit 1
+            fi
+
+            echo "Installing dependencies..."
             if ! npm ci; then
               echo "::error::FAILED command: npm ci"
               echo "PM2 was NOT restarted."
@@ -309,7 +336,7 @@ jobs:
             fi
             echo "npm ci OK — PM2 not restarted yet"
 
-      # ── 6) npm run build (Node 22) ──────────────────────────────────────
+      # ── 6) npm run build ────────────────────────────────────────────────
       - name: npm run build
         id: npm_build
         uses: appleboy/ssh-action@v1.2.0
@@ -325,31 +352,19 @@ jobs:
           script: |
             set -e
             echo "STEP: npm run build"
-            export NVM_DIR="$HOME/.nvm"
             # shellcheck disable=SC1091
-            . "$NVM_DIR/nvm.sh"
-            nvm use 22
-
-            echo "Node version:"
-            node -v
-            echo "NPM version:"
-            npm -v
-            node_major="$(node -p "process.versions.node.split('.')[0]")"
-            if [ "$node_major" != "22" ]; then
-              echo "::error::ERROR: Node.js 22 is required before npm run build. Found: $(node -v)"
-              exit 1
-            fi
+            . /tmp/zylearn_use_node259.sh
 
             cd "${APP_PATH}"
             pwd
 
-            echo "COMMAND: npm run build"
+            echo "Building application..."
             if ! npm run build; then
               echo "::error::FAILED command: npm run build"
               echo "PM2 was NOT restarted."
               exit 1
             fi
-            echo "npm run build OK — PM2 not restarted yet"
+            echo "Build completed successfully — PM2 not restarted yet"
 
       # ── 7) Check dist/ ──────────────────────────────────────────────────
       - name: Check dist directory
@@ -369,14 +384,12 @@ jobs:
             echo "STEP: Check dist directory"
             cd "${APP_PATH}"
 
-            echo "COMMAND: test -d dist"
             if [ ! -d dist ]; then
               echo "::error::FAILED command: test -d dist"
               echo "PM2 was NOT restarted."
               exit 1
             fi
 
-            echo "COMMAND: test -f dist/index.html"
             if [ ! -f dist/index.html ]; then
               echo "::error::FAILED command: test -f dist/index.html"
               echo "PM2 was NOT restarted."
@@ -402,20 +415,16 @@ jobs:
           script: |
             set -e
             echo "STEP: Check PM2 process"
-            export NVM_DIR="$HOME/.nvm"
             # shellcheck disable=SC1091
-            . "$NVM_DIR/nvm.sh"
-            nvm use 22
+            . /tmp/zylearn_use_node259.sh
 
-            echo "Node version:"
-            node -v
-            echo "which pm2: $(command -v pm2)"
+            echo "which pm2: $(which pm2)"
             pm2 -v
             pm2 status
 
             if pm2 describe ZYLEARN >/dev/null 2>&1; then
               echo "PM2 process ZYLEARN exists"
-              pm2 describe ZYLEARN | head -n 50
+              pm2 describe ZYLEARN | head -n 60
             else
               echo "PM2 process ZYLEARN does NOT exist yet"
               cd "${APP_PATH}"
@@ -423,7 +432,7 @@ jobs:
                 echo "ecosystem config found — start step will use it"
               else
                 echo "::error::FAILED: PM2 process ZYLEARN missing and no ecosystem.config.js/.cjs"
-                echo "FIX: start ZYLEARN once under Node 22, then re-run."
+                echo "FIX: start ZYLEARN once under Node 25.9.0 (nvm use 25.9.0), then re-run."
                 exit 1
               fi
             fi
@@ -445,25 +454,16 @@ jobs:
           script: |
             set -e
             echo "STEP: pm2 restart/start ZYLEARN"
-            export NVM_DIR="$HOME/.nvm"
             # shellcheck disable=SC1091
-            . "$NVM_DIR/nvm.sh"
-            nvm use 22
-
-            echo "Node version:"
-            node -v
-            node_major="$(node -p "process.versions.node.split('.')[0]")"
-            if [ "$node_major" != "22" ]; then
-              echo "::error::ERROR: Node.js 22 is required before pm2 restart. Found: $(node -v)"
-              exit 1
-            fi
+            . /tmp/zylearn_use_node259.sh
 
             cd "${APP_PATH}"
 
             if pm2 describe ZYLEARN >/dev/null 2>&1; then
-              echo "COMMAND: pm2 restart ZYLEARN --update-env"
+              echo "Restarting PM2 application..."
               if ! pm2 restart ZYLEARN --update-env; then
                 echo "::error::FAILED command: pm2 restart ZYLEARN --update-env"
+                echo "FIX: pm2 logs ZYLEARN --lines 100"
                 exit 1
               fi
             elif [ -f ecosystem.config.cjs ]; then
@@ -478,7 +478,7 @@ jobs:
             fi
             echo "PM2 restart/start issued OK"
 
-      # ── 10) Verify PM2 status + Node 22 interpreter ─────────────────────
+      # ── 10) Verify PM2 status ───────────────────────────────────────────
       - name: Verify PM2 status
         id: pm2_verify
         uses: appleboy/ssh-action@v1.2.0
@@ -491,21 +491,14 @@ jobs:
           script: |
             set -e
             echo "STEP: Verify PM2 status"
-            export NVM_DIR="$HOME/.nvm"
             # shellcheck disable=SC1091
-            . "$NVM_DIR/nvm.sh"
-            nvm use 22
-
-            echo "Node version:"
-            node -v
-            echo "NPM version:"
-            npm -v
+            . /tmp/zylearn_use_node259.sh
 
             sleep 3
-            echo "COMMAND: pm2 status ZYLEARN"
+            echo "PM2 status after restart..."
             pm2 status ZYLEARN
+            pm2 describe ZYLEARN | head -n 80
 
-            echo "COMMAND: verify online + node interpreter"
             if ! pm2 jlist | node -e '
               const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
               const app = data.find((p) => p.name === "ZYLEARN");
@@ -524,26 +517,30 @@ jobs:
             '; then
               echo "::error::FAILED command: verify pm2 status online for ZYLEARN"
               echo "FIX: pm2 logs ZYLEARN --lines 100"
+              echo "     curl -I http://127.0.0.1:3000"
               exit 1
             fi
 
-            echo "Deployment completed successfully (Node.js 22)."
+            echo "Local health check (optional):"
+            curl -I --max-time 5 http://127.0.0.1:3000 || echo "WARN: curl to :3000 failed (check PM2 serve/preview config)"
+
+            echo "Deployment completed successfully (Node.js 25.9.0)."
 
       - name: Deployment summary
         if: always()
         run: |
           {
-            echo "## ZYLEARN deployment (Node.js 22)"
+            echo "## ZYLEARN deployment (Node.js 25.9.0)"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| Target Node | \`22\` |"
+            echo "| Target Node | \`25.9.0\` (NVM) |"
             echo "| Repository | \`${{ github.repository }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Job status | \`${{ job.status }}\` |"
             echo "| SSH test | \`${{ steps.ssh_test.outcome }}\` |"
-            echo "| Node 22 ensure | \`${{ steps.check_tools.outcome }}\` |"
+            echo "| Node 25.9.0 ensure | \`${{ steps.check_tools.outcome }}\` |"
             echo "| App dir check | \`${{ steps.check_app_dir.outcome }}\` |"
             echo "| Git pull | \`${{ steps.git_pull.outcome }}\` |"
             echo "| npm ci | \`${{ steps.npm_ci.outcome }}\` |"
@@ -553,5 +550,5 @@ jobs:
             echo "| PM2 restart | \`${{ steps.pm2_restart.outcome }}\` |"
             echo "| PM2 verify | \`${{ steps.pm2_verify.outcome }}\` |"
             echo ""
-            echo "Secrets are never printed."
+            echo "Secrets are never printed. Nginx/SSL were not modified."
           } >> "$GITHUB_STEP_SUMMARY"
