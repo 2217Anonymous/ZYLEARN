@@ -80,8 +80,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     setActiveDropdown(null);
   }, [location.pathname]);
 
+  // Hysteresis avoids flicker at the threshold when scrolling back to the hero
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 40);
+    const onScroll = () => {
+      const y = window.scrollY;
+      setScrolled((prev) => {
+        if (!prev && y > 72) return true;
+        if (prev && y < 20) return false;
+        return prev;
+      });
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -92,8 +100,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     setActiveDropdown(null);
     if (location.pathname === '/') {
       e.preventDefault();
+      // Do NOT force half-nav while still mid-page — wait until scroll reaches top
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      setScrolled(false);
     }
   };
 
@@ -266,57 +274,30 @@ export const Navbar: React.FC<NavbarProps> = ({ onJoinClick }) => {
     <header className="fixed top-0 left-0 right-0 z-50">
       {/* Desktop / laptop */}
       <div className="hidden lg:block">
-        <AnimatePresence mode="wait">
+        {/* Laptop: stable full-width bar — no half/full remount (prevents hero flash on scroll-up) */}
+        <div className="xl:hidden">
+          <FullWidthBar showSocials={scrolled} />
+        </div>
+
+        {/* Wide desktop: half chrome at hero top, solid bar after scroll */}
+        <div className="hidden xl:block">
           {halfNav ? (
-            <>
-              {/* Laptop (lg–xl): full-width bar — half panel overloads at ~1024–1280px */}
-              <motion.div
-                key="half-laptop"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="xl:hidden"
-              >
-                <FullWidthBar />
-              </motion.div>
-
-              {/* Wide desktop (xl+): original half black + socials layout */}
-              <motion.div
-                key="half"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="hidden xl:grid grid-cols-[minmax(0,1.65fr)_minmax(0,0.85fr)] 2xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)] h-[90px] mt-16"
-              >
-                <div className="bg-[#2a2a2e] text-white flex items-center h-full min-w-0 pl-4 2xl:pl-10">
-                  <LogoZ className="mr-2 2xl:mr-5" onNavigateHome={goHome} />
-
-                  <div className="flex items-center flex-1 justify-center min-w-0 gap-0">
-                    <NavLinks />
-                  </div>
-
-                  <CtaButton stretch compact={false} />
+            <div className="grid grid-cols-[minmax(0,1.65fr)_minmax(0,0.85fr)] 2xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)] h-[90px] mt-16">
+              <div className="bg-[#2a2a2e] text-white flex items-center h-full min-w-0 pl-4 2xl:pl-10">
+                <LogoZ className="mr-2 2xl:mr-5" onNavigateHome={goHome} />
+                <div className="flex items-center flex-1 justify-center min-w-0 gap-0">
+                  <NavLinks />
                 </div>
-
-                <div className="bg-transparent flex items-center justify-end h-full pr-8 2xl:pr-12">
-                  <Socials dark />
-                </div>
-              </motion.div>
-            </>
+                <CtaButton stretch compact={false} />
+              </div>
+              <div className="bg-transparent flex items-center justify-end h-full pr-8 2xl:pr-12">
+                <Socials dark />
+              </div>
+            </div>
           ) : (
-            <motion.nav
-              key="full"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.22 }}
-            >
-              <FullWidthBar showSocials />
-            </motion.nav>
+            <FullWidthBar showSocials />
           )}
-        </AnimatePresence>
+        </div>
       </div>
 
       {/* Mobile — solid bar */}

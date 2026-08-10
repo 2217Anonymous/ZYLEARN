@@ -13,7 +13,7 @@ const C = {
   red: '#E53935',
 };
 
-const NAV_H = 172;
+const NAV_H = 120;
 
 const fadeUp = {
   hidden: { opacity: 0, y: 28 },
@@ -45,7 +45,7 @@ const titleLine = {
 export const Hero: React.FC<HeroProps> = ({ onJoinClick }) => {
   return (
     <section
-      className="relative bg-[#ededed] overflow-hidden w-full h-screen"
+      className="relative bg-[#ededed] overflow-hidden w-full h-screen isolate"
       style={{ height: '100dvh', minHeight: '100vh', width: '100%' }}
     >
       <div className="absolute inset-0 z-0 h-full w-full">
@@ -55,12 +55,12 @@ export const Hero: React.FC<HeroProps> = ({ onJoinClick }) => {
         <HeroWatermarks />
       </div>
 
-      <div className="relative z-10 grid grid-cols-1 grid-rows-[minmax(0,36%)_minmax(0,64%)] lg:grid-rows-none lg:grid-cols-2 h-full w-full">
+      <div className="relative z-10 grid grid-cols-1 grid-rows-[minmax(0,36%)_minmax(0,64%)] lg:grid-rows-none lg:grid-cols-2 h-full w-full min-h-0">
 
         {/* Hero copy */}
         <div
           className="relative flex flex-col justify-center items-start text-left bg-transparent px-6 sm:px-10 lg:px-12 xl:px-16 pb-8 lg:pb-14 order-2 lg:order-1 h-full min-h-0 overflow-hidden"
-          style={{ paddingTop: `calc(${NAV_H}px + clamp(1rem, 4vh, 3.5rem))` }}
+          style={{ paddingTop: `max(5.5rem, calc(${NAV_H}px + clamp(0.75rem, 3vh, 2.5rem)))` }}
         >
           {/* Watermark in the gap between navbar and “AI Learning” */}
           <div
@@ -174,6 +174,7 @@ export const Hero: React.FC<HeroProps> = ({ onJoinClick }) => {
                 delay: 1.5,
               }}
               className="w-[min(100%,720px)] lg:w-[min(108%,780px)] xl:w-[min(115%,860px)] h-full max-h-full object-contain object-bottom select-none pointer-events-none drop-shadow-[0_20px_40px_rgba(2,20,51,0.12)]"
+              draggable={false}
             />
           </motion.div>
         </motion.div>
